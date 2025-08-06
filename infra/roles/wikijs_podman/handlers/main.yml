@@ -1,0 +1,10 @@
+# Handlers can be used to restart containers if needed
+- name: restart wikijs
+  containers.podman.podman_container:
+    name: "{{ pod_name }}-app"
+    state: restarted
+
+- name: restart postgres
+  containers.podman.podman_container:
+    name: "{{ pod_name }}-db"
+    state: restarted

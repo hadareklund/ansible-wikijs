@@ -1,0 +1,208 @@
+- name: Ensure Podman is installed
+  apt:
+    name: podman
+    state: present
+    update_cache: true
+
+- name: Ensure PostgreSQL client tools are installed
+  apt:
+    name: postgresql-client
+    state: present
+    update_cache: true
+
+- name: Create a Podman pod for Wiki.js
+  containers.podman.podman_pod:
+    name: "{{ pod_name }}"
+    state: started
+    publish:
+      - "{{ wikijs_host_port }}:{{ wikijs_http_port }}"
+
+- name: Run PostgreSQL container in the pod
+  containers.podman.podman_container:
+    name: "{{ pod_name }}-db"
+    image: "{{ postgres_image }}"
+    state: started
+    pod: "{{ pod_name }}"
+    restart_policy: always
+    env:
+      POSTGRES_USER: "{{ wiki_db_user }}"
+      POSTGRES_PASSWORD: "{{ wiki_db_pass }}"
+      POSTGRES_DB: "{{ wiki_db_name }}"
+    volume:
+      - "{{ pg_data_path }}:/var/lib/postgresql/data:Z"
+
+- name: Wait for PostgreSQL (inside the Pod) to accept connections
+  shell: |
+    podman exec -i {{ pod_name }}-db \
+      pg_isready -h localhost -p 5432 -U {{ wiki_db_user }}
+  register: pg_ready
+  retries: 10
+  delay: 3
+  until: pg_ready.rc == 0
+
+- name: Create alias DB so pg_isready (healthcheck) succeeds
+  shell: |
+    podman exec -i {{ pod_name }}-db \
+      env PGPASSWORD={{ wiki_db_pass }} \
+      psql \
+        -U {{ wiki_db_user }} \
+        -d {{ wiki_db_name }} \
+        -c "CREATE DATABASE {{ wiki_db_user }} OWNER {{ wiki_db_user }};"
+  register: alias_db
+  failed_when: alias_db.rc not in [0,1]
+  changed_when: alias_db.rc == 0
+
+- name: Restore schema-only into new Wiki DB (inside container)
+  become: true
+  shell: |
+    cat /tmp/wikijs_schema.sql \
+    | podman exec -i {{ pod_name }}-db \
+        env PGPASSWORD={{ wiki_db_pass }} \
+        psql -U {{ wiki_db_user }} -d {{ wiki_db_name }}
+
+- name: Stream dump file into the DB container
+  become: true
+  shell: cat {{ dump_file }} | podman exec -i {{ pod_name }}-db \
+    env PGPASSWORD={{ wiki_db_pass }} \
+    psql -U {{ wiki_db_user }} -d {{ wiki_db_name }}
+  register: restore_result
+
+# 1) Enable pgcrypto so we can hash passwords
+- name: Enable pgcrypto extension inside Postgres container
+  become: true
+  shell: |
+    podman exec -i {{ pod_name }}-db \
+      env PGPASSWORD={{ wiki_db_pass }} \
+      psql \
+        -h 127.0.0.1 \
+        -U {{ wiki_db_user }} \
+        -d {{ wiki_db_name }} \
+        -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+# ─── Ensure the 'local' authentication provider exists ───────────────────────
+- name: Seed authentication provider 'local'
+  become: true
+  shell: |
+    podman exec -i {{ pod_name }}-db \
+      env PGPASSWORD={{ wiki_db_pass }} \
+      psql \
+        -h 127.0.0.1 \
+        -U {{ wiki_db_user }} \
+        -d {{ wiki_db_name }} \
+        -c "INSERT INTO public.authentication (
+              key,
+              \"isEnabled\",
+              config,
+              \"selfRegistration\",
+              \"domainWhitelist\",
+              \"autoEnrollGroups\",
+              \"order\",
+              \"strategyKey\",
+              \"displayName\"
+            ) VALUES (
+              'local',
+              TRUE,
+              '{}'::json,
+              FALSE,
+              '[]'::json,
+              '[]'::json,
+              0,
+              'local',
+              'Local'
+            )
+            ON CONFLICT (key) DO NOTHING;"
+
+# 2) Insert (or update) the admin user with a bcrypt‐hashed password
+- name: Seed admin user in Postgres
+  become: true
+  shell: |
+    podman exec -i {{ pod_name }}-db \
+      env PGPASSWORD={{ wiki_db_pass }} \
+      psql \
+        -h 127.0.0.1 \
+        -U {{ wiki_db_user }} \
+        -d {{ wiki_db_name }} \
+        -c "INSERT INTO public.users (email, name, password, \"isActive\", \"isVerified\", \"providerKey\", \"createdAt\", \"updatedAt\") \
+            VALUES ( \
+              '{{ wiki_admin_email }}', \
+              'Wiki Administrator', \
+              crypt('{{ wiki_admin_password }}', gen_salt('bf')), \
+              TRUE, TRUE, 'local', \
+              to_char(NOW(),'YYYY-MM-DD HH24:MI:SS'), \
+              to_char(NOW(),'YYYY-MM-DD HH24:MI:SS') \
+            )"
+
+# 3) Read the Administrators group ID
+- name: Get Administrators group ID
+  shell: |
+    podman exec -i {{ pod_name }}-db \
+      env PGPASSWORD={{ wiki_db_pass }} \
+      psql -h 127.0.0.1 -U {{ wiki_db_user }} -d {{ wiki_db_name }} \
+      -tAc "SELECT id FROM public.groups WHERE name='Administrators';"
+  register: admin_group
+  changed_when: false
+
+# 4) Read our new user’s ID
+- name: Get admin user ID
+  shell: |
+    podman exec -i {{ pod_name }}-db \
+      env PGPASSWORD={{ wiki_db_pass }} \
+      psql -h 127.0.0.1 -U {{ wiki_db_user }} -d {{ wiki_db_name }} \
+      -tAc "SELECT id FROM public.users WHERE email='{{ wiki_admin_email }}';"
+  register: admin_user
+  changed_when: false
+
+# 5) Link user → Administrators group if not already
+- name: Add admin user to Administrators group
+  become: true
+  shell: |
+    podman exec -i {{ pod_name }}-db \
+      env PGPASSWORD={{ wiki_db_pass }} \
+      psql -h 127.0.0.1 -U {{ wiki_db_user }} -d {{ wiki_db_name }} \
+      -c "INSERT INTO public.\"userGroups\" (\"userId\",\"groupId\") \
+          SELECT {{ admin_user.stdout }}, {{ admin_group.stdout }} \
+          WHERE NOT EXISTS ( \
+            SELECT 1 FROM public.\"userGroups\" \
+            WHERE \"userId\"={{ admin_user.stdout }} \
+              AND \"groupId\"={{ admin_group.stdout }} \
+          );"
+
+- name: Pull the Wiki.js image
+  containers.podman.podman_image:
+    name: "{{ wikijs_image }}"
+    pull: true
+
+- name: Ensure Wiki.js data directory exists
+  file:
+    path: "{{ wikijs_data_path }}"
+    state: directory
+    owner: root
+    mode: "0755"
+
+- name: Render Wiki.js config.yml to skip setup wizard
+  template:
+    src: config.yml.j2
+    dest: "{{ wikijs_data_path }}/config.yml"
+    owner: root
+    mode: '0644'
+
+
+
+- name: Run the Wiki.js container in the pod
+  containers.podman.podman_container:
+    name: "{{ pod_name }}-app"
+    image: "{{ wikijs_image }}"
+    state: started
+    pod: "{{ pod_name }}"
+    restart_policy: always
+    volume:
+      - "{{ wikijs_data_path }}:/data:Z"
+      - "{{ wikijs_data_path }}/config.yml:/wiki/config.yml:Z"
+    env:
+      DB_TYPE: postgres
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USER: "{{ wiki_db_user }}"
+      DB_PASS: "{{ wiki_db_pass }}"
+      DB_NAME: "{{ wiki_db_name }}"
+      PORT: "{{ wikijs_http_port }}"

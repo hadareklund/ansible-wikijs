@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+podman pod rm -f wikijs-pod
+
+find /var/lib/pgsql/data /var/www/wiki/ -mindepth 1 -delete
+
+
+ansible-playbook infra/site.yml -i inventories/local.ini

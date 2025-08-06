@@ -1,0 +1,19 @@
+# default tunable variables for the Wiki.js Podman role
+pod_name: "wikijs-pod"
+wikijs_image: "docker.mammal.local/hellas/wikijs/wiki:2"
+postgres_image: "docker.mammal.local/hellas/wikijs/postgres:16"
+wikijs_host_port: 3000           # host port to expose Wiki.js
+wikijs_http_port: 3000           # container port for Wiki.js
+wikijs_data_path: "/var/www/wiki/data"
+pg_data_path: "/var/lib/pgsql/data"
+wiki_db_user: "wikiuser"
+wiki_db_pass: "mammalwiki"
+wiki_db_name: "wiki"
+wikijs_db_container: "wikijs-pod-db"
+wikijs_restore_dump_path: "/home/hadar/ansible-project/wiki_site.dump"
+
+# Default variables for the wikijs-backup role
+backup_repo_path: /opt/wiki-backups
+backup_git_url: https://git.mammal.local/hellas/wikijs.git
+backup_git_branch: main
+backup_dump_filename: wiki_site.dump

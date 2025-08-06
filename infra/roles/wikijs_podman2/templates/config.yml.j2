@@ -1,0 +1,14 @@
+# Wiki.js static config to skip the web installer
+
+db:
+  type: postgres
+  host: 127.0.0.1
+  port: 5432
+  user: {{ wiki_db_user }}
+  pass: {{ wiki_db_pass }}
+  db: {{ wiki_db_name }}
+
+
+bindIP: 0.0.0.0
+port: {{ wikijs_http_port }}
+

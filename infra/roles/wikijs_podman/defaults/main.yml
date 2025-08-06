@@ -1,0 +1,14 @@
+# default tunable variables for the Wiki.js Podman role
+pod_name: "wikijs-pod"
+wikijs_image: "docker.io/requarks/wiki:2"
+postgres_image: "docker.io/library/postgres:16"
+wikijs_host_port: 3000           # host port to expose Wiki.js
+wikijs_http_port: 3000           # container port for Wiki.js
+wikijs_data_path: "/var/www/wiki/data"
+pg_data_path: "/var/lib/pgsql/data"
+wiki_db_user: "wikiuser"
+wiki_db_pass: "mammalwiki"
+wiki_db_name: "wiki"
+dump_file: "/tmp/wikijs_partial.sql"
+wiki_admin_email: "mammalmammal66@gmail.com"
+wiki_admin_password: "mammalwiki"

@@ -1,0 +1,12 @@
+---
+- name: Deploy clean Wiki.js with Podman
+  hosts: wikijs_servers
+  become: true
+
+  collections:
+    - containers.podman
+    - community.postgresql
+
+  roles:
+    - wikijs_podman2
+    

@@ -1,0 +1,7 @@
+# Role metadata
+galaxy_info:
+  author: Your Name
+  description: "Role to deploy Wiki.js with Podman and PostgreSQL in a pod"
+  license: MIT
+  min_ansible_version: 2.9
+dependencies: []

@@ -1,0 +1,100 @@
+- name: Ensure Podman is installed
+  apt:
+    name: podman
+    state: present
+    update_cache: true
+
+- name: Ensure PostgreSQL client tools are installed
+  apt:
+    name: postgresql-client
+    state: present
+    update_cache: true
+
+- name: Create a Podman pod for Wiki.js
+  containers.podman.podman_pod:
+    name: "{{ pod_name }}"
+    state: started
+    publish:
+      - "{{ wikijs_host_port }}:{{ wikijs_http_port }}"
+
+- name: Run PostgreSQL container in the pod
+  containers.podman.podman_container:
+    name: "{{ pod_name }}-db"
+    image: "{{ postgres_image }}"
+    state: started
+    pod: "{{ pod_name }}"
+    restart_policy: always
+    env:
+      POSTGRES_USER: "{{ wiki_db_user }}"
+      POSTGRES_PASSWORD: "{{ wiki_db_pass }}"
+      POSTGRES_DB: "{{ wiki_db_name }}"
+    volume:
+      - "{{ pg_data_path }}:/var/lib/postgresql/data:Z"
+
+- name: Wait for PostgreSQL (inside the Pod) to accept connections
+  shell: |
+    podman exec -i {{ pod_name }}-db \
+      pg_isready -h localhost -p 5432 -U {{ wiki_db_user }}
+  register: pg_ready
+  retries: 10
+  delay: 3
+  until: pg_ready.rc == 0
+
+- name: Create alias DB so pg_isready (healthcheck) succeeds
+  shell: |
+    podman exec -i {{ pod_name }}-db \
+      env PGPASSWORD={{ wiki_db_pass }} \
+      psql \
+        -U {{ wiki_db_user }} \
+        -d {{ wiki_db_name }} \
+        -c "CREATE DATABASE {{ wiki_db_user }} OWNER {{ wiki_db_user }};"
+  register: alias_db
+  failed_when: alias_db.rc not in [0,1]
+  changed_when: alias_db.rc == 0
+
+- name: Restore Wiki.js database dump into Postgres container
+  become: yes
+  shell: |
+    podman exec -i {{ wikijs_db_container }} \
+      pg_restore \
+        --clean \
+        --no-owner \
+        -U {{ wiki_db_user }} \
+        -d {{ wiki_db_name }} \
+      < {{ wikijs_restore_dump_path }} 2>/dev/null
+  args:
+    executable: /bin/bash
+  register: pg_restore_result
+  # Treat exit code 0 or 1 as success, and suppress pg_restore stderr output
+  failed_when: pg_restore_result.rc not in [0, 1]
+  changed_when: pg_restore_result.rc == 0
+
+- name: Pull the Wiki.js image
+  containers.podman.podman_image:
+    name: "{{ wikijs_image }}"
+    pull: true
+
+- name: Ensure Wiki.js data directory exists
+  file:
+    path: "{{ wikijs_data_path }}"
+    state: directory
+    owner: root
+    mode: "0755"
+
+- name: Run the Wiki.js container in the pod
+  containers.podman.podman_container:
+    name: "{{ pod_name }}-app"
+    image: "{{ wikijs_image }}"
+    state: started
+    pod: "{{ pod_name }}"
+    restart_policy: always
+    volume:
+      - "{{ wikijs_data_path }}:/data:Z"
+    env:
+      DB_TYPE: postgres
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USER: "{{ wiki_db_user }}"
+      DB_PASS: "{{ wiki_db_pass }}"
+      DB_NAME: "{{ wiki_db_name }}"
+      PORT: "{{ wikijs_http_port }}"
