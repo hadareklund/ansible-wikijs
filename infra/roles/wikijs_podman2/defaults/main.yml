@@ -17,3 +17,4 @@ backup_repo_path: /opt/wiki-backups
 backup_git_url: https://git.mammal.local/hellas/wikijs.git
 backup_git_branch: main
 backup_dump_filename: wiki_site.dump
+backup_cron_user: root
