@@ -52,6 +52,23 @@
   failed_when: alias_db.rc not in [0,1]
   changed_when: alias_db.rc == 0
 
+- name: Ensure backup repository is cloned
+  become: yes
+  git:
+    repo: "{{ backup_git_url }}"
+    dest: "{{ backup_repo_path }}"
+    version: "{{ backup_git_branch }}"
+    update: yes
+    force: yes
+
+- name: Pull latest dump from GitLab
+  become: yes
+  git:
+    repo: "{{ backup_git_url }}"
+    dest: "{{ backup_repo_path }}"
+    version: "{{ backup_git_branch }}"
+    update: yes
+
 - name: Restore Wiki.js database dump into Postgres container
   become: yes
   shell: |

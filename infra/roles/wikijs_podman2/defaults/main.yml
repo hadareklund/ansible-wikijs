@@ -10,7 +10,7 @@ wiki_db_user: "wikiuser"
 wiki_db_pass: "mammalwiki"
 wiki_db_name: "wiki"
 wikijs_db_container: "wikijs-pod-db"
-wikijs_restore_dump_path: "/home/hadar/ansible-project/wiki_site.dump"
+wikijs_restore_dump_path: "/opt/wiki-backups/wiki_site.dump"
 
 # Default variables for the wikijs-backup role
 backup_repo_path: /opt/wiki-backups
