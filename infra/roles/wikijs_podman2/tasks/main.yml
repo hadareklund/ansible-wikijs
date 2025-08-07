@@ -116,19 +116,51 @@
       DB_NAME: "{{ wiki_db_name }}"
       PORT: "{{ wikijs_http_port }}"
 
+- name: Fetch root@gitlab password from Vault
+  ansible.builtin.import_tasks: roles/ansible_vault/tasks/main.yml
+  vars:
+    username: root@gitlab
+    password: []
+
+- name: Mark backup repo path as a safe Git directory for root
+  become: yes
+  git_config:
+    scope: global
+    name: safe.directory
+    value: "{{ backup_repo_path }}"
+    state: present
+
+- name: Configure Git user.name for root
+  become: yes
+  git_config:
+    scope: global
+    name: user.name
+    value: root
+    state: present
+
+- name: Configure Git user.email for root
+  become: yes
+  git_config:
+    scope: global
+    name: user.email
+    value: root@root.local
+    state: present
+
+- name: Ensure root’s .netrc has GitLab PAT for non-interactive auth
+  become: yes
+  copy:
+    dest: /root/.netrc
+    mode: '0600'
+    content: |
+      machine git.{{ domain }}
+      login root
+      password {{ password }}
+
 - name: Schedule daily Wiki.js DB backup at 06:00
+  become: yes
   cron:
     name: "Wiki.js daily DB backup"
-    user: "{{ backup_cron_user }}"
     minute: "0"
     hour: "6"
-    job: |
-      cd {{ backup_repo_path }} && \
-      git pull --ff-only && \
-      podman exec -i {{ wikijs_db_container }} pg_dump -U {{ wiki_db_user }} -Fc {{ wiki_db_name }} > {{ backup_repo_path }}/{{ backup_dump_filename }} && \
-      git add {{ backup_dump_filename }} && \
-      if ! git diff --cached --quiet; then \
-        git commit -m "Daily DB dump: $(date +'%Y-%m-%d')" && \
-        git push origin {{ backup_git_branch }}; \
-      fi
-  become: yes
+    user: "{{ backup_cron_user }}"
+    job: '/bin/bash -lc "cd {{ backup_repo_path }} && git pull --ff-only origin {{ backup_git_branch }} && podman exec -i {{ wikijs_db_container }} pg_dump -U {{ wiki_db_user }} -Fc {{ wiki_db_name }} > {{ backup_repo_path }}/{{ backup_dump_filename }} && git add {{ backup_dump_filename }} && if ! git diff --cached --quiet; then git commit -m \"Daily DB dump: $(date +\%F)\" && git push origin {{ backup_git_branch }}; fi" >> /var/log/wiki_db_backup.log 2>&1'
