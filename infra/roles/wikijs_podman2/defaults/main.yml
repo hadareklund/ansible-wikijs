@@ -1,7 +1,7 @@
 # default tunable variables for the Wiki.js Podman role
 pod_name: "wikijs-pod"
-wikijs_image: "docker.{{ domain }}/hellas/wikijs/wiki:2"
-postgres_image: "docker.{{ domain }}/hellas/wikijs/postgres:16"
+wikijs_image: "docker.{{ domain }}/externalimport/dockerimages/wikijs:2"
+postgres_image: "docker.{{ domain }}/externalimport/dockerimages/postgres:16"
 wikijs_host_port: 3000           # host port to expose Wiki.js
 wikijs_http_port: 3000           # container port for Wiki.js
 wikijs_data_path: "/var/www/wiki/data"
